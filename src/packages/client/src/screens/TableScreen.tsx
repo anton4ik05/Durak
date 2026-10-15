@@ -17,7 +17,7 @@ import {
   type GameLogKind,
   type Suit,
 } from "@durka/shared";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { CardView } from "../components/CardView";
 import { PHASE_LABEL, RANK_LABEL, SUIT_NAME, SUIT_SYMBOL, deckCaption, isRedSuit, modeCaption } from "../labels";
 import { useGame } from "../net/GameProvider";
@@ -143,6 +143,13 @@ function sortHandChoice(hand: readonly Card[], trump: Suit, mode: AutoSort): Car
   });
 }
 
+function fanPlace(index: number, count: number): { angle: number; drop: number } {
+  if (count <= 1) return { angle: 0, drop: 0 };
+  const spread = Math.min(8.5, 48 / (count - 1));
+  const offset = index - (count - 1) / 2;
+  return { angle: offset * spread, drop: Math.abs(offset) * 3.4 };
+}
+
 function cardsLabel(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -159,13 +166,36 @@ function isOpeningSet(cards: Card[], playerCount: number): boolean {
   return cards.every((card) => card.kind === "regular" && card.rank === first.rank);
 }
 
-/** Место на эллипсе: вы внизу, следующий по часовой стрелке — слева. */
+/** Место по краю прямоугольного стола: вы снизу по центру, дальше по часовой стрелке. */
 function seatPoint(slot: number, total: number): { left: string; top: string } {
-  const angle = Math.PI + (slot * 2 * Math.PI) / Math.max(total, 1);
-  return {
-    left: `${50 + Math.sin(angle) * 32}%`,
-    top: `${50 - Math.cos(angle) * 30}%`,
-  };
+  const left = 13;
+  const right = 87;
+  const top = 14;
+  const bottom = 86;
+  const width = right - left;
+  const height = bottom - top;
+  const perimeter = 2 * (width + height);
+  let rest = (slot / Math.max(total, 1)) * perimeter;
+  let x = (left + right) / 2;
+  let y = bottom;
+  const edges: [number, number, number][] = [
+    [width / 2, -1, 0],
+    [height, 0, -1],
+    [width, 1, 0],
+    [height, 0, 1],
+    [width / 2, -1, 0],
+  ];
+  for (const [length, dx, dy] of edges) {
+    if (rest <= length) {
+      x += dx * rest;
+      y += dy * rest;
+      break;
+    }
+    x += dx * length;
+    y += dy * length;
+    rest -= length;
+  }
+  return { left: `${x}%`, top: `${y}%` };
 }
 
 export function TableScreen() {
@@ -188,7 +218,6 @@ export function TableScreen() {
     node: HTMLDivElement;
   } | null>(null);
   const suppressClick = useRef(false);
-  const flipRef = useRef<Map<string, DOMRect> | null>(null);
   const [logOpen, setLogOpen] = useState(readLogOpen);
   const logBox = useRef<HTMLDivElement>(null);
   const feltRef = useRef<HTMLDivElement>(null);
@@ -210,13 +239,8 @@ export function TableScreen() {
       .join("|") ?? "";
 
   useEffect(() => {
-    const alive = new Set(handKey ? handKey.split("|") : []);
-    const open = new Set(openKey ? openKey.split("|") : []);
-    setSelectedKeys((current) => {
-      const next = current.filter((key) => alive.has(key));
-      return next.length === current.length ? current : next;
-    });
-    setTargetKey((current) => (current && open.has(current) ? current : null));
+    setSelectedKeys([]);
+    setTargetKey(null);
   }, [handKey, openKey]);
 
   useEffect(() => {
@@ -230,35 +254,6 @@ export function TableScreen() {
       return next;
     });
   }, [handKey]);
-
-  useLayoutEffect(() => {
-    const before = flipRef.current;
-    const strip = handStrip.current;
-    if (!before || !strip) return;
-    flipRef.current = null;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const nodes = [...strip.querySelectorAll<HTMLElement>("[data-hand-card]")];
-    for (const node of nodes) {
-      const id = node.dataset.handCard;
-      const prev = id ? before.get(id) : undefined;
-      if (!prev) continue;
-      const next = node.getBoundingClientRect();
-      const dx = prev.left - next.left;
-      const dy = prev.top - next.top;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-      node.style.transition = "none";
-      node.style.transform = `translate(${dx}px, ${dy}px)`;
-      requestAnimationFrame(() => {
-        node.style.transition = "transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1)";
-        node.style.transform = "";
-        const clear = () => {
-          node.style.transition = "";
-          node.removeEventListener("transitionend", clear);
-        };
-        node.addEventListener("transitionend", clear);
-      });
-    }
-  }, [customOrder, dragKey]);
 
   useEffect(() => {
     const node = logBox.current;
@@ -350,17 +345,11 @@ export function TableScreen() {
     : null;
   const flashingPlayer = field.players.find((player) => player.id === field.flash?.playerId);
   const defenderCount = field.players.find((player) => player.id === field.defenderId)?.cardCount ?? 0;
-  const canAttack =
-    view.yourTurn &&
-    field.phase === "attack" &&
-    isOpeningSet(selectedCards, field.players.length) &&
-    selectedCards.length <= defenderCount;
   const youId = view.youId;
   const youDefend = field.defenderId === youId;
   const youHelp = field.pairs && partnerId(field.players, field.defenderId) === youId;
   const youCover = (youDefend || youHelp) && field.phase === "defend";
   const myPartnerId = field.pairs ? partnerId(field.players, youId) : null;
-  const canDefend = youCover && selected !== null && target !== undefined && canBeat(selected, target, field.trump);
   const canPass = youCover && passContext !== null && canTransfer(passContext);
   const canShow =
     youCover &&
@@ -391,6 +380,16 @@ export function TableScreen() {
   const youAttack = field.attackerId === youId;
   const yourTurn = view.yourTurn;
   const sameSeat = field.attackerId === field.defenderId;
+  const mateRank = (() => {
+    if (selectedCards.length === 0 || selectedCards.some((card) => card.kind !== "regular")) return null;
+    const rank = selectedCards[0]?.kind === "regular" ? selectedCards[0].rank : null;
+    if (!rank || !selectedCards.every((card) => card.kind === "regular" && card.rank === rank)) return null;
+    if (field.phase === "attack" && yourTurn && selectedCards.length < defenderCount) return rank;
+    const throwing = !youDefend && !tableJoker && (field.phase === "defend" || field.phase === "throw_in") && selectedCards.length < roomLeft;
+    if (!throwing || !selectedCards.every((card) => canThrowIn(card, field.tableRanks))) return null;
+    if ((youHelp || !youEdge) && rank !== leadRank) return null;
+    return rank;
+  })();
 
   function who(id: string, name: string | undefined): string {
     if (id === youId) return "Вы";
@@ -445,11 +444,6 @@ export function TableScreen() {
       }
       return [key];
     });
-  }
-
-  function playAttack() {
-    if (!canAttack) return;
-    game.play({ type: "attack", cards: selectedCards });
   }
 
   function playDefend(card: Card, against: Card) {
@@ -545,9 +539,13 @@ export function TableScreen() {
   }
 
   function commitDrop(card: Card, aim: TableAim): void {
+    const clearSelection = () => setSelectedKeys([]);
     if (aim.kind === "beat") {
       const attack = unbeaten.find((pair) => cardKey(pair.attack) === aim.attackKey)?.attack;
-      if (attack && youCover && canBeat(card, attack, field.trump)) playDefend(card, attack);
+      if (attack && youCover && canBeat(card, attack, field.trump)) {
+        clearSelection();
+        playDefend(card, attack);
+      }
       return;
     }
     if (field.phase === "attack" && yourTurn) {
@@ -559,14 +557,21 @@ export function TableScreen() {
         selectedCards.length <= defenderCount
           ? selectedCards
           : [card];
-      if (isOpeningSet(bunch, field.players.length) && bunch.length <= defenderCount) game.play({ type: "attack", cards: bunch });
+      if (isOpeningSet(bunch, field.players.length) && bunch.length <= defenderCount) {
+        clearSelection();
+        game.play({ type: "attack", cards: bunch });
+      }
       return;
     }
     if (youCover && cardCanTransfer(card)) {
+      clearSelection();
       game.play({ type: "transfer", card });
       return;
     }
-    if (canThrowCard(card)) game.play({ type: "throw_in", cards: [card] });
+    if (canThrowCard(card)) {
+      clearSelection();
+      game.play({ type: "throw_in", cards: [card] });
+    }
   }
 
   function onSlotDown(event: ReactPointerEvent<HTMLDivElement>, key: string) {
@@ -587,7 +592,7 @@ export function TableScreen() {
   function onSlotMove(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointer !== event.pointerId) return;
-    if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 8) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 16) return;
     if (!drag.moved) {
       drag.node.setPointerCapture(event.pointerId);
       const nodes = [...(handStrip.current?.querySelectorAll<HTMLElement>("[data-hand-card]") ?? [])];
@@ -614,20 +619,17 @@ export function TableScreen() {
     if (!drag || drag.pointer !== event.pointerId) return;
     dragRef.current = null;
     const moved = drag.moved;
+    const travelX = event.clientX - drag.x;
+    const travelY = event.clientY - drag.y;
     const card = hand.find((item) => cardKey(item) === drag.key);
     const hit = moved && card ? aimAt(event.clientX, event.clientY, card) : { over: false, aim: null };
+    const reorder = moved && !hit.over && Math.hypot(travelX, travelY) > 28 && Math.abs(travelX) > Math.abs(travelY);
     if (moved && commit && hit.over) {
       suppressClick.current = true;
       if (hit.aim && card) commitDrop(card, hit.aim);
       const active = document.activeElement;
       if (active instanceof HTMLElement && event.currentTarget.contains(active)) active.blur();
-    } else if (moved && commit && handStrip.current) {
-      const before = new Map<string, DOMRect>();
-      for (const node of handStrip.current.querySelectorAll<HTMLElement>("[data-hand-card]")) {
-        const id = node.dataset.handCard;
-        if (id) before.set(id, node.getBoundingClientRect());
-      }
-      flipRef.current = before;
+    } else if (reorder && commit) {
       suppressClick.current = true;
       const next = reorderKeys(hand.map((card) => cardKey(card)), drag.key, indexInBoxes(event.clientX, event.clientY, drag.boxes));
       setCustomOrder(next);
@@ -747,51 +749,27 @@ export function TableScreen() {
   }
 
   function hintText(): string {
-    if (field.phase === "finished") return finishHint();
-    if (autoFinish) {
-      return defenderCount === 0 ? "Защитник сбросил все карты. Ход закроется сам." : "Джокер на столе. Карты сбросятся сами.";
+    if (field.phase === "finished") return "";
+    if (autoFinish) return defenderCount === 0 ? "Защитник без карт. Ход закроется сам." : "Джокер на столе. Карты сбросятся сами.";
+    if (yourTurn && field.phase === "attack") return "Перетащите карту на стол. Одинаковые можно отметить вместе.";
+    if ((youDefend || youHelp) && field.phase === "defend") {
+      return unbeaten.length > 1 ? "Перетащите карту на ту, которую бьёте." : "Перетащите карту на стол.";
     }
-    if (field.phase === "throw_in") {
-      if (youHelp) {
-        return !tableJoker && roomLeft > 0 && leadRank !== null
-          ? "Можно подкинуть заходную карту. «Бито» говорят соперники."
-          : "Вы с напарником защищаетесь. «Бито» говорят соперники.";
-      }
-      if (youDefend) return pendingBito();
-      if (!youMustBito) return "Вы уже без карт. «Бито» говорить не нужно.";
-      if (!saidBito && roomLeft > 0 && (youEdge || leadRank !== null)) {
-        return youEdge
-          ? "Подсвечены карты, которые можно подкинуть. «Бито» говорят те, у кого ещё есть карты."
-          : "Можно подкинуть заходную карту. «Бито» говорят те, у кого ещё есть карты.";
-      }
-      if (saidBito && roomLeft > 0 && (youEdge || leadRank !== null)) {
-        return youEdge
-          ? "Можно подкинуть ещё. Прежнее «бито» при этом сбросится."
-          : "Можно подкинуть заходную карту. Прежнее «бито» при этом сбросится.";
-      }
-      if (!saidBito) return "Скажите «бито». Нужен ответ каждого, у кого есть карты.";
-      return `Вы сказали «бито». ${pendingBito()}`;
+    if (field.phase === "throw_in" && youDefend) return pendingBito();
+    if (field.phase === "throw_in" && !saidBito && youMustBito) return "Если больше не подкидываете — скажите «бито».";
+    if (!youDefend && !tableJoker && roomLeft > 0 && (field.phase === "defend" || field.phase === "throw_in") && (youEdge || leadRank !== null)) {
+      return "Подсвеченные карты можно перетащить на стол.";
     }
-    if (youHelp && field.phase === "defend") {
-      const beat = unbeaten.length > 1 ? "Выберите карту на столе, затем бейте своей." : "Нажмите свою карту — она побьёт стол за напарника.";
-      const pass = field.mode === "perevodnoy" ? " Можно перевести или посветить за него." : "";
-      const lead = !tableJoker && roomLeft > 0 && leadRank !== null ? " Заходную карту можно подкинуть." : "";
-      return `Карты напарника не видны.${pass}${lead} ${beat}`;
-    }
-    if (field.phase === "defend" && !youDefend) {
-      if (tableJoker) return "После джокера подкидывать нельзя.";
-      if (roomLeft <= 0) return "Больше подкинуть нельзя: у защитника не хватит карт.";
-      if (youEdge) return "Подсвечены карты, которые можно подкинуть.";
-      if (leadRank !== null) return "Можно подкинуть только заходную карту.";
-      return "Подкидывают только соседи защитника.";
-    }
-    if (youDefend && field.phase === "defend") {
-      const beat = unbeaten.length > 1 ? "Выберите карту на столе, затем нажмите, чем бить." : "Нажмите карту в руке — она сразу побьёт стол.";
-      return hand.some((card) => cardCanTransfer(card)) ? `Можно перевести картой того же номинала. ${beat}` : beat;
-    }
-    if (yourTurn && field.phase === "attack") return "Можно отметить несколько карт одного номинала.";
-    if (yourTurn) return "Выберите карту в руке.";
-    return "Ждём ход соперника.";
+    return "";
+  }
+
+  function handStatus(): string {
+    if (field.phase === "finished") return "";
+    if (youAttack && field.phase === "attack") return "ваш ход";
+    if (youDefend && field.phase === "defend") return "вы отбиваетесь";
+    if (youCover && !youDefend) return "помогаете напарнику";
+    if (field.phase === "throw_in" && youMustBito && !saidBito) return "ваш ответ";
+    return "";
   }
 
   return (
@@ -811,18 +789,13 @@ export function TableScreen() {
           <span className="rail-deck">В колоде {field.deckCount}</span>
         </div>
         <div className="rail-actions">
-          {!logOpen && (
-            <button type="button" className="ghost" onClick={toggleLog}>
-              Журнал
-            </button>
-          )}
           <button type="button" className="ghost" onClick={game.leaveRoom}>
             Выйти
           </button>
         </div>
       </aside>
 
-      <section className="table-ring" aria-label="Рассадка за круглым столом">
+      <section className="table-ring" aria-label="Рассадка за столом">
         <div className="ring-oval" />
         {clockwise.map((player, slot) => {
           if (!player) return null;
@@ -945,56 +918,32 @@ export function TableScreen() {
             <CardView card={flight.card} />
           </div>
         ))}
-      </section>
-      {logOpen && (
-      <aside className="panel play-log" aria-label="Журнал партии">
-        <div className="log-head">
-          <h2>Журнал</h2>
-          <button type="button" className="ghost" onClick={toggleLog}>
-            Скрыть
+        <div className={logOpen ? "play-log open" : "play-log"}>
+          {logOpen && (
+            <div className="panel log-body" aria-label="Журнал партии">
+              <div className="log-scroll" ref={logBox}>
+                {field.log.map((entry) => (
+                  <p key={entry.id} className={`log-line log-${entry.kind}`}>
+                    <span className="log-mark">{LOG_MARK[entry.kind]}</span>
+                    <span>
+                      <LogText text={entry.text} />
+                    </span>
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+          <button type="button" className="ghost log-toggle" aria-expanded={logOpen} onClick={toggleLog}>
+            {logOpen ? "Скрыть" : "Журнал"}
           </button>
         </div>
-        {field.log[0] && (
-          <p className={`log-line log-${field.log[0].kind}`}>
-            <span className="log-mark">{LOG_MARK[field.log[0].kind]}</span>
-            <span>
-              <LogText text={field.log[0].text} />
-            </span>
-          </p>
-        )}
-        <div className="log-scroll" ref={logBox}>
-          {field.log.slice(1).map((entry) => (
-            <p key={entry.id} className={`log-line log-${entry.kind}`}>
-              <span className="log-mark">{LOG_MARK[entry.kind]}</span>
-              <span>
-                <LogText text={entry.text} />
-              </span>
-            </p>
-          ))}
-        </div>
-      </aside>
-      )}
+      </section>
 
       <section className={["panel", "hand-wrap", youAttack ? "you-attack" : "", youDefend || youCover ? "you-defend" : ""].filter(Boolean).join(" ")}>
         <div className="hand-head">
           <h2>
             Ваши карты
-            {field.phase !== "finished" && youAttack && !youDefend && !youHelp && defender ? ` · вы ходите, ${defender.name} отбивается` : ""}
-            {field.phase !== "finished" && youDefend && attacker
-              ? youAttack
-                ? " · вы отбиваетесь"
-                : ` · ${attacker.name} ходит на вас`
-              : ""}
-            {youCover && !youDefend && defender ? ` · помогаете ${defender.name}` : ""}
-            {youHelp && !tableJoker && roomLeft > 0 && leadRank !== null ? " · можно подкинуть заходную" : ""}
-            {(field.phase === "defend" || field.phase === "throw_in") &&
-            !youDefend &&
-            !youHelp &&
-            !tableJoker &&
-            roomLeft > 0 &&
-            (youEdge || leadRank !== null)
-              ? " · можно подкинуть"
-              : ""}
+            {handStatus() ? <span className="pill hand-status">{handStatus()}</span> : null}
           </h2>
           <div className="sort-switch" role="group" aria-label="Порядок карт">
             <button type="button" className={sortMode === "trump" ? "on" : ""} title="Сначала козыри, затем по старшинству" onClick={() => chooseSort("trump")}>
@@ -1014,10 +963,11 @@ export function TableScreen() {
         {me && me.flashedRanks.length > 0 && (
           <p className="hint">Светил: {me.flashedRanks.map((rank) => RANK_LABEL[rank]).join(", ")}</p>
         )}
-        {sortMode === "custom" && <p className="hint">Влево или вправо — порядок в руке. На стол — ход этой картой.</p>}
+        {sortMode === "custom" && <p className="hint">Влево или вправо меняет порядок в руке.</p>}
         <div className={["hand", sortMode === "custom" ? "hand-custom" : "", dragKey ? "hand-dragging" : ""].filter(Boolean).join(" ")} ref={handStrip}>
           {hand.map((card, index) => {
             const key = cardKey(card);
+            const mate = mateRank !== null && card.kind === "regular" && card.rank === mateRank && !selectedKeys.includes(key);
             const live = cardPlayable(card);
             const locked = jokerLocked(card) || (live === false && !youCover);
             const fromIndex = dragKey ? hand.findIndex((item) => cardKey(item) === dragKey) : -1;
@@ -1028,22 +978,23 @@ export function TableScreen() {
             }
             const lifted = dragKey === key && dragOffset;
             const motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            const slotStyle: CSSProperties | undefined = lifted
+            const fan = fanPlace(index, hand.length);
+            const fanTransform = `rotate(${fan.angle}deg) translateY(${fan.drop}px)`;
+            const slotStyle: CSSProperties = lifted
               ? {
                   transform: `translate(${dragOffset.x}px, ${dragOffset.y}px) scale(1.06) rotate(-3deg)`,
+                  transformOrigin: "50% 50%",
                   zIndex: 8,
                   transition: "none",
                 }
-              : dragKey
-                ? {
-                    transform: slide ? `translateX(${slide}px)` : undefined,
-                    transition: motion ? "none" : "transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)",
-                  }
-                : undefined;
+              : {
+                  transform: slide ? `translateX(${slide}px) ${fanTransform}` : fanTransform,
+                  transition: motion ? "none" : "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
+                };
             return (
               <div
                 key={key}
-                className={dragKey === key ? "hand-slot is-dragging" : "hand-slot"}
+                className={["hand-slot", dragKey === key ? "is-dragging" : "", mate ? "is-mate" : ""].filter(Boolean).join(" ")}
                 data-hand-card={key}
                 style={slotStyle}
                 onPointerDown={(event) => onSlotDown(event, key)}
@@ -1072,42 +1023,36 @@ export function TableScreen() {
             );
           })}
         </div>
-        <div className="actions">
-          <button type="button" disabled={!canAttack} onClick={playAttack}>
-            Атаковать{selectedCards.length > 1 && field.phase === "attack" ? ` ${selectedCards.length}` : ""}
-          </button>
-          <button type="button" disabled={!canDefend} onClick={() => selected && target && playDefend(selected, target)}>
-            {youHelp ? "Помочь" : "Отбиться"}
-          </button>
-          {field.mode === "perevodnoy" && (
-            <>
-              <button type="button" disabled={!canPass} onClick={() => selected && game.play({ type: "transfer", card: selected })}>
+        {(canPass || canShow || canThrow || canClose || (youDefend && field.phase === "defend" && field.table.length > 0)) && (
+          <div className="actions">
+            {canPass && selected && (
+              <button type="button" onClick={() => { setSelectedKeys([]); game.play({ type: "transfer", card: selected }); }}>
                 Перевести
               </button>
-              <button type="button" disabled={!canShow} onClick={() => selected && game.play({ type: "flash", card: selected })}>
+            )}
+            {canShow && selected && (
+              <button type="button" onClick={() => { setSelectedKeys([]); game.play({ type: "flash", card: selected }); }}>
                 Посветить
               </button>
-            </>
-          )}
-          <button
-            type="button"
-            disabled={!(youDefend && field.phase === "defend" && field.table.length > 0)}
-            onClick={() => game.play({ type: "take" })}
-          >
-            Беру
-          </button>
-          <button
-            type="button"
-            disabled={!canThrow}
-            onClick={() => canThrow && game.play({ type: "throw_in", cards: selectedCards.filter((card) => card.kind !== "joker") })}
-          >
-            Подкинуть{selectedCards.length > 1 && (field.phase === "defend" || field.phase === "throw_in") ? ` ${selectedCards.length}` : ""}
-          </button>
-          <button type="button" disabled={!canClose} onClick={() => game.play({ type: "done" })}>
-            Бито
-          </button>
-        </div>
-        <p className="hint">{hintText()}</p>
+            )}
+            {youDefend && field.phase === "defend" && field.table.length > 0 && (
+              <button type="button" onClick={() => { setSelectedKeys([]); game.play({ type: "take" }); }}>
+                Беру
+              </button>
+            )}
+            {canThrow && (
+              <button type="button" onClick={() => { setSelectedKeys([]); game.play({ type: "throw_in", cards: selectedCards.filter((card) => card.kind !== "joker") }); }}>
+                Подкинуть{selectedCards.length > 1 ? ` ${selectedCards.length}` : ""}
+              </button>
+            )}
+            {canClose && (
+              <button type="button" onClick={() => { setSelectedKeys([]); game.play({ type: "done" }); }}>
+                Бито
+              </button>
+            )}
+          </div>
+        )}
+        {hintText() ? <p className="hint">{hintText()}</p> : null}
       </section>
       {field.phase === "finished" && (
         <div className="end-screen">

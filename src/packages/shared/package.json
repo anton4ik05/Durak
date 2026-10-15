@@ -8,7 +8,8 @@
   },
   "types": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/cards.test.ts src/lobby.test.ts src/rules.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

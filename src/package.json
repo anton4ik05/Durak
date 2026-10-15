@@ -9,6 +9,7 @@
     "dev:server": "npm run dev -w @durka/server",
     "dev:client": "npm run dev -w @durka/client",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "build": "npm run build -w @durka/client"
   },
   "devDependencies": {

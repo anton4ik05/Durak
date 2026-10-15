@@ -97,9 +97,10 @@ h2 {
 }
 
 .app-play {
-  width: min(1240px, calc(100% - 1rem));
+  width: 100%;
+  max-width: none;
   height: 100dvh;
-  padding: 0.55rem 0 0.6rem;
+  padding: 0.45rem 0.75rem 0.55rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -305,9 +306,21 @@ body:has(.app-play) {
 }
 
 .hand-head h2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
   margin-bottom: 0;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.hand-status {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .sort-switch {
@@ -373,17 +386,33 @@ body:has(.app-play) {
 
 .play-log {
   position: absolute;
-  z-index: 7;
-  top: 0;
-  right: 0;
+  z-index: 8;
+  right: 0.55rem;
+  bottom: 0.55rem;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  width: min(15rem, 38vw);
-  max-height: min(22rem, 52%);
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 0.4rem;
+  width: min(18rem, calc(100% - 1.2rem));
+  max-height: calc(100% - 1.1rem);
+  pointer-events: none;
+}
+
+.log-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   min-height: 0;
+  max-height: min(16rem, 100%);
+  padding: 0.7rem 0.7rem 0.55rem;
   overflow: hidden;
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.38);
+  pointer-events: auto;
+}
+
+.log-toggle {
+  pointer-events: auto;
+  flex: none;
 }
 
 .play-log h2 {
@@ -618,12 +647,12 @@ select option {
 
 .ring-oval {
   position: absolute;
-  inset: 8% 5%;
-  border-radius: 50%;
+  inset: 8% 5% 9%;
+  border-radius: 22px;
   background:
-    radial-gradient(ellipse at 50% 36%, rgba(255, 255, 255, 0.16), transparent 42%),
-    radial-gradient(ellipse at 50% 88%, rgba(0, 0, 0, 0.28), transparent 46%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 26%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.22), transparent 32%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 5px),
     #15764a;
   box-shadow:
     inset 0 0 0 1px rgba(231, 201, 138, 0.45),
@@ -712,8 +741,8 @@ select option {
   z-index: 1;
   left: 50%;
   top: 50%;
-  width: min(28rem, 64%);
-  max-height: 68%;
+  width: min(46rem, 68%);
+  max-height: 64%;
   min-height: 0;
   overflow: auto;
   transform: translate(-50%, -50%);
@@ -1015,20 +1044,74 @@ select option {
 
 .hand {
   gap: 0;
+  justify-content: center;
+  align-items: flex-end;
+  min-height: 12.5rem;
+  padding: 1.6rem 2rem 0.15rem;
+  overflow: visible;
+}
+
+.hand .card {
+  width: 98px;
+  height: 142px;
+  border-radius: 12px;
+}
+
+.hand .card-pip {
+  font-size: 2rem;
+}
+
+.hand .card-index {
+  font-size: 0.95rem;
+}
+
+.hand .card-index i {
+  font-size: 0.82rem;
+}
+
+.hand .card-hit:hover,
+.hand .card-hit:focus-visible,
+.hand .card-hit.selected:hover,
+.hand .card-hit.selected:focus-visible {
+  transform: translateY(-22px);
+}
+
+.hand .card-hit.selected,
+.hand .card-hit.selected:hover,
+.hand .card-hit.selected:focus-visible {
+  transform: none;
+}
+
+.hand .card-hit.selected .card {
+  box-shadow:
+    0 10px 18px rgba(0, 0, 0, 0.28),
+    0 0 0 3px #f6e2b6;
+}
+
+.hand-slot.is-mate .card-hit {
+  transform: none;
+}
+
+.hand-slot.is-mate .card {
+  box-shadow:
+    0 12px 20px rgba(0, 0, 0, 0.3),
+    0 0 0 2px rgba(246, 226, 182, 0.95),
+    0 0 16px rgba(231, 201, 138, 0.55);
 }
 
 .hand-slot + .hand-slot {
-  margin-left: -1.15rem;
+  margin-left: -3.35rem;
 }
 
 .hand-slot:hover,
-.hand-slot.is-dragging {
-  z-index: 4;
+.hand-slot:focus-within {
+  z-index: 6;
 }
 
 .hand-slot {
   position: relative;
   touch-action: none;
+  transform-origin: 50% 130%;
 }
 
 .hand-dragging {
@@ -2034,7 +2117,8 @@ body:has(.app-menu) {
   }
 
   .app-play {
-    width: min(100% - 0.8rem, 1240px);
+    width: 100%;
+    padding-inline: 0.4rem;
   }
 
   .app-play .table-screen {
@@ -2047,9 +2131,13 @@ body:has(.app-menu) {
   }
 
   .play-log {
-    top: 4.6rem;
+    right: 0.4rem;
+    bottom: 0.4rem;
     width: min(16rem, calc(100% - 0.8rem));
-    max-height: min(14rem, 40%);
+  }
+
+  .log-body {
+    max-height: min(12rem, 38vh);
   }
 
   .app-play .rail {
@@ -2084,14 +2172,34 @@ body:has(.app-menu) {
     font-size: 0.85rem;
   }
 
+  .ring-oval {
+    inset: 11% 3% 12%;
+    border-radius: 16px;
+  }
+
   .felt.ring-center {
-    width: min(15rem, 50%);
+    width: min(100%, 74%);
+    max-height: 58%;
   }
 
   .card,
   .ghost-card {
     width: 58px;
     height: 84px;
+  }
+
+  .hand {
+    min-height: 9.5rem;
+    padding-inline: 0.6rem;
+  }
+
+  .hand .card {
+    width: 76px;
+    height: 110px;
+  }
+
+  .hand-slot + .hand-slot {
+    margin-left: -2.5rem;
   }
 
   h1 {
