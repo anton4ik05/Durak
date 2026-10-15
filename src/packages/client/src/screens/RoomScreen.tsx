@@ -1,7 +1,26 @@
-import { startBlockReason } from "@durka/shared";
+import { startBlockReason, type RoomPlayerSnapshot } from "@durka/shared";
 import { useState } from "react";
 import { deckCaption, modeCaption } from "../labels";
 import { useGame } from "../net/GameProvider";
+
+function SeatCard({ player, youId, hostId }: { player: RoomPlayerSnapshot; youId: string | null; hostId: string }) {
+  return (
+    <li className={[player.connected ? "" : "offline", player.ready ? "ready" : ""].filter(Boolean).join(" ")}>
+      <span className="avatar" aria-hidden="true">
+        {player.name.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="seat-name">
+        {player.name}
+        {player.id === youId ? " · вы" : ""}
+      </span>
+      <span className="seat-role">
+        {player.id === hostId ? "хозяин стола" : "гость"}
+        {!player.connected ? " · не в сети" : ""}
+      </span>
+      <span className={player.ready ? "pill pill-ready" : "pill"}>{player.ready ? "готов" : "думает"}</span>
+    </li>
+  );
+}
 
 export function RoomScreen() {
   const game = useGame();
@@ -57,36 +76,45 @@ export function RoomScreen() {
             Готовы {readyCount} из {room.players.length}
           </p>
         </div>
-        <ul className="seat-grid">
-          {room.players.map((player) => (
-            <li key={player.id} className={[player.connected ? "" : "offline", player.ready ? "ready" : ""].filter(Boolean).join(" ")}>
-              <span className="avatar" aria-hidden="true">
-                {player.name.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="seat-name">
-                {player.name}
-                {player.id === game.playerId ? " · вы" : ""}
-              </span>
-              <span className="seat-role">
-                {player.id === room.hostId ? "хозяин стола" : "гость"}
-                {room.pairs ? ` · ${player.seat % 2 === 0 ? "пара 1" : "пара 2"}` : ""}
-                {!player.connected ? " · не в сети" : ""}
-              </span>
-              <span className={player.ready ? "pill pill-ready" : "pill"}>{player.ready ? "готов" : "думает"}</span>
-            </li>
-          ))}
-        </ul>
+        {room.pairs ? (
+          <div className="pair-board">
+            {[0, 1].map((side) => (
+              <div key={side} className="pair-column">
+                <p className="eyebrow">{side === 0 ? "Пара 1" : "Пара 2"}</p>
+                <ul className="seat-grid">
+                  {room.players
+                    .filter((player) => player.seat % 2 === side)
+                    .map((player) => (
+                      <SeatCard key={player.id} player={player} youId={game.playerId} hostId={room.hostId} />
+                    ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <ul className="seat-grid">
+            {room.players.map((player) => (
+              <SeatCard key={player.id} player={player} youId={game.playerId} hostId={room.hostId} />
+            ))}
+          </ul>
+        )}
 
         <div className="row room-actions">
           <button type="button" className={me?.ready ? "ghost" : ""} onClick={() => game.setReady(!me?.ready)}>
             {me?.ready ? "Пока не готов" : "Я готов"}
           </button>
+          {isHost && room.pairs && (
+            <button type="button" className="ghost" disabled={room.players.length < 2} onClick={game.shuffleSeats}>
+              Перетасовать пары
+            </button>
+          )}
           {isHost && (
             <button type="button" disabled={block !== null} onClick={game.startGame}>
               Раздать карты
             </button>
           )}
         </div>
+        {isHost && room.pairs && <p className="hint">Напарники сидят напротив. Перетасовка сбрасывает «готов».</p>}
         {isHost && block && <p className="hint">{block}</p>}
         {!isHost && <p className="hint">Ждём, пока хозяин стола раздаст карты.</p>}
       </section>

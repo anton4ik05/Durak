@@ -71,6 +71,7 @@ interface GameClient {
   leaveRoom: () => void;
   returnToTable: () => void;
   setReady: (ready: boolean) => void;
+  shuffleSeats: () => void;
   startGame: () => void;
   reconnect: () => void;
 }
@@ -237,6 +238,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       leaveRoom: () => send({ type: "leave_room" }),
       returnToTable: () => send({ type: "return_to_table" }),
       setReady: (ready) => send({ type: "set_ready", ready }),
+      shuffleSeats: () => send({ type: "shuffle_seats" }),
       startGame: () => send({ type: "start_game" }),
       reconnect: () => setAttempt((current) => current + 1),
     }),

@@ -48,6 +48,7 @@ function LogText({ text }: { text: string }) {
 }
 
 type AutoSort = "trump" | "suit" | "rank";
+type TableAim = { kind: "table" } | { kind: "beat"; attackKey: string };
 type HandSort = AutoSort | "custom";
 
 type FlightCard = {
@@ -66,9 +67,9 @@ const LOG_STORAGE = "durka:log";
 
 function readLogOpen(): boolean {
   try {
-    return localStorage.getItem(LOG_STORAGE) !== "hidden";
+    return localStorage.getItem(LOG_STORAGE) === "open";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -199,6 +200,7 @@ export function TableScreen() {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
   const [dragStep, setDragStep] = useState(0);
+  const [tableAim, setTableAim] = useState<TableAim | null>(null);
   const logLength = view?.public.log.length ?? 0;
   const handKey = view?.hand.map((card) => cardKey(card)).join("|") ?? "";
   const openKey =
@@ -512,6 +514,61 @@ export function TableScreen() {
     return nearest;
   }
 
+  function canThrowCard(card: Card): boolean {
+    if (youDefend || tableJoker || roomLeft < 1) return false;
+    if (field.phase !== "defend" && field.phase !== "throw_in") return false;
+    if (!canThrowIn(card, field.tableRanks)) return false;
+    if (youHelp || !youEdge) return card.kind === "regular" && card.rank === leadRank;
+    return true;
+  }
+
+  function aimAt(x: number, y: number, card: Card): { over: boolean; aim: TableAim | null } {
+    const felt = feltRef.current?.getBoundingClientRect();
+    if (!felt || x < felt.left || x > felt.right || y < felt.top || y > felt.bottom) return { over: false, aim: null };
+    const nodes = feltRef.current?.querySelectorAll<HTMLElement>("[data-drop-attack]") ?? [];
+    for (const node of nodes) {
+      const box = node.getBoundingClientRect();
+      const attackKey = node.dataset.dropAttack;
+      if (!attackKey || x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
+      const attack = unbeaten.find((pair) => cardKey(pair.attack) === attackKey)?.attack;
+      if (attack && youCover && canBeat(card, attack, field.trump)) return { over: true, aim: { kind: "beat", attackKey } };
+      return { over: true, aim: null };
+    }
+    if (field.phase === "attack" && yourTurn && isOpeningSet([card], field.players.length) && defenderCount >= 1) {
+      return { over: true, aim: { kind: "table" } };
+    }
+    if (youCover && cardCanTransfer(card)) return { over: true, aim: { kind: "table" } };
+    if (canThrowCard(card)) return { over: true, aim: { kind: "table" } };
+    const beatable = youCover ? unbeaten.filter((pair) => canBeat(card, pair.attack, field.trump)) : [];
+    if (beatable.length === 1 && beatable[0]) return { over: true, aim: { kind: "beat", attackKey: cardKey(beatable[0].attack) } };
+    return { over: true, aim: null };
+  }
+
+  function commitDrop(card: Card, aim: TableAim): void {
+    if (aim.kind === "beat") {
+      const attack = unbeaten.find((pair) => cardKey(pair.attack) === aim.attackKey)?.attack;
+      if (attack && youCover && canBeat(card, attack, field.trump)) playDefend(card, attack);
+      return;
+    }
+    if (field.phase === "attack" && yourTurn) {
+      const key = cardKey(card);
+      const bunch =
+        selectedKeys.includes(key) &&
+        selectedCards.length > 1 &&
+        isOpeningSet(selectedCards, field.players.length) &&
+        selectedCards.length <= defenderCount
+          ? selectedCards
+          : [card];
+      if (isOpeningSet(bunch, field.players.length) && bunch.length <= defenderCount) game.play({ type: "attack", cards: bunch });
+      return;
+    }
+    if (youCover && cardCanTransfer(card)) {
+      game.play({ type: "transfer", card });
+      return;
+    }
+    if (canThrowCard(card)) game.play({ type: "throw_in", cards: [card] });
+  }
+
   function onSlotDown(event: ReactPointerEvent<HTMLDivElement>, key: string) {
     if (event.button !== 0) return;
     suppressClick.current = false;
@@ -544,9 +601,12 @@ export function TableScreen() {
       drag.moved = true;
       setDragStep(drag.step);
     }
+    const card = hand.find((item) => cardKey(item) === drag.key);
+    const hit = card ? aimAt(event.clientX, event.clientY, card) : { over: false, aim: null };
     setDragKey(drag.key);
     setDragOffset({ x: event.clientX - drag.x, y: event.clientY - drag.y });
-    setDropIndex(indexInBoxes(event.clientX, event.clientY, drag.boxes));
+    setTableAim(hit.aim);
+    setDropIndex(hit.over ? null : indexInBoxes(event.clientX, event.clientY, drag.boxes));
   }
 
   function onSlotUp(event: ReactPointerEvent<HTMLDivElement>, commit: boolean) {
@@ -554,7 +614,14 @@ export function TableScreen() {
     if (!drag || drag.pointer !== event.pointerId) return;
     dragRef.current = null;
     const moved = drag.moved;
-    if (moved && commit && handStrip.current) {
+    const card = hand.find((item) => cardKey(item) === drag.key);
+    const hit = moved && card ? aimAt(event.clientX, event.clientY, card) : { over: false, aim: null };
+    if (moved && commit && hit.over) {
+      suppressClick.current = true;
+      if (hit.aim && card) commitDrop(card, hit.aim);
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && event.currentTarget.contains(active)) active.blur();
+    } else if (moved && commit && handStrip.current) {
       const before = new Map<string, DOMRect>();
       for (const node of handStrip.current.querySelectorAll<HTMLElement>("[data-hand-card]")) {
         const id = node.dataset.handCard;
@@ -573,6 +640,7 @@ export function TableScreen() {
     setDropIndex(null);
     setDragOffset(null);
     setDragStep(0);
+    setTableAim(null);
   }
 
   function chooseSort(mode: HandSort) {
@@ -727,7 +795,7 @@ export function TableScreen() {
   }
 
   return (
-    <main className={logOpen ? "table-screen" : "table-screen log-hidden"}>
+    <main className="table-screen">
       <aside className="panel rail">
         <div className="rail-top">
           <p className="eyebrow">стол {room.code}</p>
@@ -791,7 +859,7 @@ export function TableScreen() {
             </article>
           );
         })}
-        <div className="felt ring-center" ref={feltRef}>
+        <div className={tableAim?.kind === "table" ? "felt ring-center drop-ready" : "felt ring-center"} ref={feltRef}>
           {field.phase !== "finished" && attacker && defender && (
             <p className="ring-caption">
               <span className="pill">
@@ -814,7 +882,13 @@ export function TableScreen() {
               ) : (
                 <div className="pairs">
                   {field.table.map((pair) => (
-                    <div key={cardKey(pair.attack)} className="pair">
+                    <div
+                      key={cardKey(pair.attack)}
+                      className={
+                        tableAim?.kind === "beat" && tableAim.attackKey === cardKey(pair.attack) ? "pair drop-ready" : "pair"
+                      }
+                      data-drop-attack={pair.defense ? undefined : cardKey(pair.attack)}
+                    >
                       <CardView
                         card={pair.attack}
                         playable={
@@ -940,7 +1014,7 @@ export function TableScreen() {
         {me && me.flashedRanks.length > 0 && (
           <p className="hint">Светил: {me.flashedRanks.map((rank) => RANK_LABEL[rank]).join(", ")}</p>
         )}
-        {sortMode === "custom" && <p className="hint">Потяните карту влево или вправо — она останется на новом месте.</p>}
+        {sortMode === "custom" && <p className="hint">Влево или вправо — порядок в руке. На стол — ход этой картой.</p>}
         <div className={["hand", sortMode === "custom" ? "hand-custom" : "", dragKey ? "hand-dragging" : ""].filter(Boolean).join(" ")} ref={handStrip}>
           {hand.map((card, index) => {
             const key = cardKey(card);

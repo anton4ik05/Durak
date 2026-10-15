@@ -91,6 +91,9 @@ export class DurakServer {
       case "set_ready":
         this.setReady(session, message.ready);
         return;
+      case "shuffle_seats":
+        this.shuffleSeats(session);
+        return;
       case "start_game":
         this.startGame(session);
         return;
@@ -208,6 +211,25 @@ export class DurakServer {
     session.roomCode = room.code;
     this.sync(room);
     this.publishTables();
+  }
+
+  private shuffleSeats(session: Session): void {
+    const room = this.roomOf(session);
+    if (!room) return;
+    if (session.playerId !== room.hostId) {
+      this.fail(session, "not_allowed", "Пары тасует хозяин стола");
+      return;
+    }
+    if (!room.pairs) {
+      this.fail(session, "not_allowed", "Пары есть только в игре 2 на 2");
+      return;
+    }
+    if (room.game) {
+      this.fail(session, "game_in_progress", "Партия уже началась");
+      return;
+    }
+    room.shuffleSeats();
+    this.sync(room);
   }
 
   private setReady(session: Session, ready: boolean): void {

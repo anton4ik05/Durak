@@ -24,6 +24,7 @@ export type ClientMessage =
   | { type: "leave_room" }
   | { type: "return_to_table" }
   | { type: "set_ready"; ready: boolean }
+  | { type: "shuffle_seats" }
   | { type: "start_game" }
   | { type: "play"; action: GameAction };
 
@@ -37,6 +38,7 @@ export const ERROR_CODES = [
   "game_in_progress",
   "not_in_room",
   "cannot_start",
+  "not_allowed",
   "not_in_game",
   "not_implemented",
   "illegal_move",
@@ -133,6 +135,8 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       return { type: "return_to_table" };
     case "set_ready":
       return typeof value.ready === "boolean" ? { type: "set_ready", ready: value.ready } : null;
+    case "shuffle_seats":
+      return { type: "shuffle_seats" };
     case "start_game":
       return { type: "start_game" };
     case "play": {
