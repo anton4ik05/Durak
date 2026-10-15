@@ -1,0 +1,20 @@
+{
+  "name": "durka",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green npm:dev:server npm:dev:client",
+    "dev:server": "npm run dev -w @durka/server",
+    "dev:client": "npm run dev -w @durka/client",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @durka/client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

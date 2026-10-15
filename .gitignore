@@ -230,6 +230,9 @@ PublishScripts/
 **/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+# src/packages is the monorepo source tree, not NuGet packages.
+!src/[Pp]ackages/
+!src/[Pp]ackages/**
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files
