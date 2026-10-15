@@ -1,35 +1,77 @@
-import { DECK_SIZES, MAX_PLAYERS, MIN_PLAYERS, type DeckSize, type GameMode } from "@durka/shared";
-import { useState } from "react";
+import { DECK_SIZES, MAX_PLAYERS, MIN_PLAYERS, normalizeName, type DeckSize, type GameMode, type TableListing } from "@durka/shared";
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { CardView } from "../components/CardView";
 import { deckCaption, modeCaption } from "../labels";
 import { useGame } from "../net/GameProvider";
 
+function tableRank(table: TableListing): number {
+  if (table.status === "playing") return 2;
+  if (table.playerCount >= table.maxPlayers) return 1;
+  return 0;
+}
+
 export function LobbyScreen() {
   const game = useGame();
+  const nameInput = useRef<HTMLInputElement>(null);
+  const createDialog = useRef<HTMLDialogElement>(null);
   const [code, setCode] = useState("");
+  const [creating, setCreating] = useState(false);
   const [maxPlayers, setMaxPlayers] = useState(MAX_PLAYERS);
   const [deckSize, setDeckSize] = useState<DeckSize>(36);
   const [jokers, setJokers] = useState(false);
   const [mode, setMode] = useState<GameMode>("podkidnoy");
   const [pairs, setPairs] = useState(false);
   const offline = game.status !== "online";
+  const tables = [...game.tables].sort((left, right) => tableRank(left) - tableRank(right) || left.code.localeCompare(right.code));
+  const waiting = tables.filter((table) => table.status === "lobby");
+  const playing = tables.filter((table) => table.status === "playing");
+  const openCount = waiting.filter((table) => table.playerCount < table.maxPlayers).length;
+
+  function focusNameIfMissing(): void {
+    if (!normalizeName(game.name)) nameInput.current?.focus();
+  }
+
+  function openCreate(): void {
+    setCreating(true);
+  }
+
+  function closeCreate(): void {
+    setCreating(false);
+  }
+
+  function submitCreate(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!normalizeName(game.name)) {
+      closeCreate();
+      nameInput.current?.focus();
+    }
+    game.createRoom({ maxPlayers: pairs ? 4 : maxPlayers, deckSize, jokers, mode, pairs });
+  }
+
+  useEffect(() => {
+    const dialog = createDialog.current;
+    if (!dialog) return;
+    if (creating && !dialog.open) dialog.showModal();
+    if (!creating && dialog.open) dialog.close();
+  }, [creating]);
 
   return (
     <main className="menu">
-      <section className="menu-hero">
-        <div>
+      <section className="menu-banner">
+        <div className="menu-banner-copy">
           <p className="eyebrow">Сетевой дурак</p>
           <h2>Сядьте за стол</h2>
-          <p className="lead">Подкидной или переводной, колода на 36 или 52 карты, от двух до шести игроков.</p>
+          <p className="lead">Подкидной или переводной. Выберите стол из списка или откройте свой.</p>
         </div>
         <div className="hero-fan" aria-hidden="true">
           <CardView card={{ kind: "regular", suit: "spades", rank: "A" }} />
           <CardView card={{ kind: "regular", suit: "hearts", rank: "10" }} />
           <CardView card={{ kind: "joker", color: "red" }} />
         </div>
-        <label className="field">
+        <label className="field name-field">
           <span>Ваше имя</span>
           <input
+            ref={nameInput}
             value={game.name}
             maxLength={16}
             placeholder="Как к вам обращаться"
@@ -38,18 +80,155 @@ export function LobbyScreen() {
         </label>
       </section>
 
-      <div className="menu-grid">
-        <form
-          className="panel menu-card"
-          onSubmit={(event) => {
-            event.preventDefault();
-            game.createRoom({ maxPlayers: pairs ? 4 : maxPlayers, deckSize, jokers, mode, pairs });
-          }}
-        >
-          <div className="menu-card-head">
-            <h2>Новый стол</h2>
-            <p className="hint">Настройки сохранятся за этим столом до конца вечера.</p>
+      <section className="panel menu-card tables-board">
+        <div className="tables-head">
+          <div>
+            <h2>Открытые столы</h2>
+            <p className="hint">
+              {openCount > 0
+                ? "Нажмите «Сесть» у свободного стола. Код нужен, только если стола нет в списке."
+                : waiting.length > 0
+                  ? "Мест нет. Создайте новый стол или дождитесь, пока кто-то выйдет."
+                  : "Свободных столов нет. Создайте свой или введите код, если вас пригласили."}
+            </p>
           </div>
+        </div>
+
+        {waiting.length === 0 ? (
+          <div className="empty-board">
+            <p>Пока некуда сесть. Новый стол появится здесь у всех, кто открыл игру.</p>
+            <button type="button" onClick={openCreate} disabled={offline}>
+              Создать стол
+            </button>
+          </div>
+        ) : (
+          <ul className="table-cards">
+            {waiting.map((table) => {
+              const open = table.playerCount < table.maxPlayers;
+              return (
+                <li key={table.code} className={open ? "table-card table-card-open" : "table-card table-card-closed"}>
+                  <div className="table-main">
+                    <p className="table-code">{table.code}</p>
+                    <p className="table-host">Хозяин: {table.hostName}</p>
+                    <p className="table-meta">
+                      <span>{modeCaption(table.mode)}{table.pairs ? " · 2 на 2" : ""}</span>
+                      <span>{deckCaption(table.deckSize, table.jokers)}</span>
+                    </p>
+                    <p className="table-players">{table.playerNames.join(" · ")}</p>
+                  </div>
+                  <div className="table-card-side">
+                    <span className="seat-stat">
+                      <b>
+                        {table.playerCount}/{table.maxPlayers}
+                      </b>
+                      <i>{open ? "ждут" : "полон"}</i>
+                    </span>
+                    {open ? (
+                      <button
+                        type="button"
+                        className="table-join"
+                        disabled={offline}
+                        onClick={() => {
+                          focusNameIfMissing();
+                          game.joinRoom(table.code);
+                        }}
+                      >
+                        Сесть
+                      </button>
+                    ) : (
+                      <span className="table-closed">Мест нет</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {playing.length > 0 && (
+          <div className="playing-board">
+            <h3>Уже играют</h3>
+            <ul className="table-cards">
+              {playing.map((table) => (
+                <li key={table.code} className="table-card table-card-closed">
+                  <div className="table-main">
+                    <p className="table-code">{table.code}</p>
+                    <p className="table-host">Хозяин: {table.hostName}</p>
+                    <p className="table-meta">
+                      <span>{modeCaption(table.mode)}{table.pairs ? " · 2 на 2" : ""}</span>
+                      <span>{deckCaption(table.deckSize, table.jokers)}</span>
+                    </p>
+                    <p className="table-players">{table.playerNames.join(" · ")}</p>
+                  </div>
+                  <div className="table-card-side">
+                    <span className="seat-stat seat-stat-live">
+                      <b>
+                        {table.playerCount}/{table.maxPlayers}
+                      </b>
+                      <i>идёт</i>
+                    </span>
+                    <span className="table-closed">Партия идёт</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="tables-foot">
+          <form
+            className="code-join"
+            onSubmit={(event) => {
+              event.preventDefault();
+              focusNameIfMissing();
+              game.joinRoom(code);
+            }}
+          >
+            <label className="field">
+              <span>Код стола</span>
+              <input
+                className="code-input"
+                value={code}
+                maxLength={4}
+                placeholder="ABCD"
+                autoCapitalize="characters"
+                onChange={(event) => setCode(event.target.value.toUpperCase())}
+              />
+            </label>
+            <button type="submit" disabled={offline || code.trim().length !== 4}>
+              Сесть по коду
+            </button>
+          </form>
+          {waiting.length > 0 && (
+            <button type="button" onClick={openCreate} disabled={offline}>
+              Создать стол
+            </button>
+          )}
+        </div>
+      </section>
+
+      <dialog
+        ref={createDialog}
+        className="create-dialog"
+        onClose={closeCreate}
+        onClick={(event: MouseEvent<HTMLDialogElement>) => {
+          if (event.target === event.currentTarget) closeCreate();
+        }}
+      >
+          <form className="panel menu-card create-card" onSubmit={submitCreate}>
+            <div className="create-dialog-bar">
+              <div className="menu-card-head">
+                <h2>Новый стол</h2>
+                <p className="hint">Настройки сохранятся за этим столом до конца вечера.</p>
+              </div>
+              <div className="modal-fan" aria-hidden="true">
+                <CardView card={{ kind: "regular", suit: "diamonds", rank: "Q" }} />
+                <CardView card={{ kind: "regular", suit: "clubs", rank: "K" }} />
+              </div>
+              <button type="button" className="ghost create-close" onClick={closeCreate} aria-label="Закрыть">
+                ×
+              </button>
+            </div>
 
           <fieldset className="choice">
             <legend>Игра</legend>
@@ -130,79 +309,11 @@ export function LobbyScreen() {
             </p>
           )}
 
-          <button type="submit" className="menu-submit" disabled={offline}>
-            Создать стол
-          </button>
-        </form>
-
-        <div className="menu-side">
-          <form
-            className="panel menu-card"
-            onSubmit={(event) => {
-              event.preventDefault();
-              game.joinRoom(code);
-            }}
-          >
-            <div className="menu-card-head">
-              <h2>Войти по коду</h2>
-              <p className="hint">Четыре символа, которые назвал хозяин стола.</p>
-            </div>
-            <label className="field">
-              <span>Код</span>
-              <input
-                className="code-input"
-                value={code}
-                maxLength={4}
-                placeholder="ABCD"
-                autoCapitalize="characters"
-                onChange={(event) => setCode(event.target.value.toUpperCase())}
-              />
-            </label>
-            <button type="submit" className="menu-submit" disabled={offline || code.trim().length !== 4}>
-              Сесть за стол
+            <button type="submit" className="menu-submit" disabled={offline}>
+              Открыть стол
             </button>
           </form>
-
-          <section className="panel menu-card">
-            <div className="menu-card-head">
-              <h2>Открытые столы</h2>
-              <p className="hint">{game.tables.length === 0 ? "Пока пусто" : `${game.tables.length} за этим сервером`}</p>
-            </div>
-            {game.tables.length === 0 ? (
-              <p className="empty-note">Создайте стол — он появится здесь у всех, кто открыл игру.</p>
-            ) : (
-              <ul className="table-cards">
-                {game.tables.map((table) => {
-                  const open = table.status === "lobby" && table.playerCount < table.maxPlayers;
-                  return (
-                    <li key={table.code} className="table-card">
-                      <div>
-                        <p className="table-code">{table.code}</p>
-                        <p className="table-meta">
-                          <span>{modeCaption(table.mode)}{table.pairs ? " · 2 на 2" : ""}</span>
-                          <span>{deckCaption(table.deckSize, table.jokers)}</span>
-                        </p>
-                        <p className="hint">{table.playerNames.join(", ")}</p>
-                      </div>
-                      <div className="table-card-side">
-                        <span className={table.status === "playing" ? "seat-stat seat-stat-live" : "seat-stat"}>
-                          <b>
-                            {table.playerCount}/{table.maxPlayers}
-                          </b>
-                          <i>{table.status === "playing" ? "идёт" : open ? "ждут" : "полон"}</i>
-                        </span>
-                        <button type="button" className="table-join" disabled={offline || !open} onClick={() => game.joinRoom(table.code)}>
-                          {table.status === "playing" ? "Войти" : open ? "Сесть" : "Полон"}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        </div>
-      </div>
+      </dialog>
     </main>
   );
 }

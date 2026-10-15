@@ -979,6 +979,7 @@ export function TableScreen() {
               >
                 <CardView
                   card={card}
+                  trump={card.kind === "regular" && card.suit === field.trump}
                   playable={live === null ? undefined : live}
                   selected={selectedKeys.includes(key)}
                   onClick={
